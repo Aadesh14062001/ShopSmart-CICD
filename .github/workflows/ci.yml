@@ -1,4 +1,4 @@
-name: ShopSmart CI
+name: ShopSmart CI/CD
 
 on:
   push:
@@ -10,25 +10,34 @@ on:
     branches:
       - main
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout source code
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # 2. Setup .NET
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
 
+      # 3. Restore backend dependencies
       - name: Restore .NET dependencies
         run: dotnet restore ./shopsmart/shopsmart.csproj
 
+      # 4. Build backend
       - name: Build .NET backend
         run: dotnet build ./shopsmart/shopsmart.csproj --configuration Release --no-restore
 
+      # 5. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -36,10 +45,40 @@ jobs:
           cache: npm
           cache-dependency-path: ./shopsmartfront/shopsmart/package-lock.json
 
+      # 6. Install frontend dependencies
       - name: Install frontend dependencies
         working-directory: ./shopsmartfront/shopsmart
         run: npm ci
 
+      # 7. Build React frontend
       - name: Build React frontend
         working-directory: ./shopsmartfront/shopsmart
         run: npm run build
+
+      # 8. Build Docker image
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t shopsmartacr20261118.azurecr.io/shopsmart-api:${{ github.sha }} \
+            ./shopsmart
+
+      # 9. Login to Azure
+      # Only main branch needs Azure access
+      - name: Azure login
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # 10. Login to Azure Container Registry
+      - name: Login to Azure Container Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: az acr login --name shopsmartacr20261118
+
+      # 11. Push Docker image to ACR
+      - name: Push Docker image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker push shopsmartacr20261118.azurecr.io/shopsmart-api:${{ github.sha }}
